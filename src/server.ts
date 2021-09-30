@@ -1,51 +1,24 @@
-import http from 'http';
-import express from 'express';
-import bodyParser from 'body-parser';
-import logging from './config/logging';
-import config from './config/config';
-import routes from './route/test';
+// TypeScript
+import { v2 as webdav } from 'webdav-server';
 
-const NAMESPACE = 'Server';
-const router = express();
-
-// Logging the request
-router.use((req, res, next) => {
-    logging.info(NAMESPACE, `[METHOD]: ${req.method} [URL]: ${req.url} [IP]: ${req.socket.remoteAddress}`);
-    res.on('finish', () => {
-        logging.info(NAMESPACE, `[METHOD]: ${req.method} [URL]: ${req.url} [IP]: ${req.socket.remoteAddress} [STATUS]: ${req.statusCode}`);
-    });
-
-    next();
-});
-
-// Parse the request
-router.use(bodyParser.urlencoded({ extended: false }));
-router.use(bodyParser.json());
-
-// Rules of the API
-router.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-
-    if (req.method == 'OPTIONS') {
-        res.header('Access-Control-Allow-Methods', 'PUT, POST, PATCH, DELETE, GET');
-        return res.status(200).json({});
+// User manager (tells who are the users)
+const userManager = new webdav.SimpleUserManager();
+const user = userManager.addUser('username', 'password', false);
+ 
+// Privilege manager (tells which users can access which files/folders)
+const privilegeManager = new webdav.SimplePathPrivilegeManager();
+privilegeManager.setRights(user, '/', [ 'all' ]);
+ 
+const server = new webdav.WebDAVServer({
+    // HTTP Digest authentication with the realm 'Default realm'
+    httpAuthentication: new webdav.HTTPDigestAuthentication(userManager, 'Default realm'),
+    privilegeManager: privilegeManager,
+    port: 1900, // Load the server on the port 2000 (if not specified, default is 1900)
+    autoSave: { // Will automatically save the changes in the 'data.json' file
+        treeFilePath: 'data.json'
     }
-
-    next();
 });
 
-// Routes
-router.use('/webdav', routes);
-
-// Error handling
-router.use((req, res, next) => {
-    const error = new Error('Not found');
-
-    res.status(404).json({
-        message: error.message
-    });
+server.setFileSystem('/webdav', new webdav.PhysicalFileSystem('/home/melangakasun/ownCloud7'), (success) => {
+    server.start(() => console.log('READY'));
 });
-
-const httpServer = http.createServer(router);
-httpServer.listen(config.server.port, () => logging.info(NAMESPACE, `Server is running on ${config.server.hostname}:${config.server.port}`));
