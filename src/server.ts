@@ -5,28 +5,27 @@ import mountSeadrive from './seafile_utils/mountSeadrive';
 import createConfig from './seafile_utils/createConfig';
 import getToken from './seafile_utils/getToken';
 import fs from 'fs';
-import Redis from 'ioredis';
-import JSONCache from 'redis-json';
+import redis from 'redis';
 import * as crypto from 'crypto';
 import {User} from './user';
 
 const host = 'http://localhost:7080';
 const baseDir = '/home/melangakasun/Desktop/FYP/test';
 const realm = 'Seadrive';
+const redis_port = 6379;
 
 // database
-const users =  new Set<User>();
+const users =  new Map<string, User>();
  
 const app = express();
 app.use(bodyParser.urlencoded());
 app.use(bodyParser.json());
 
-const redis1 = new Redis();
-const jsonCache = new JSONCache(redis1);
+const redisClient = redis.createClient(redis_port);
 
 app.post('/login', async function (req, res) {
-    let username = req.body.username;
-    let password = req.body.password;
+    let username: string = req.body.username;
+    let password: string = req.body.password;
     console.log(`Login request... Username: ${username}, Password: ${password}`);
     
     // check if user already registered
@@ -56,22 +55,27 @@ app.post('/login', async function (req, res) {
                     }
                     // Mounting the directory
                     console.log(`Mounting with the Seadrive directory...`);
-                    mountSeadrive(`${baseDir}/${username}/seadrive.conf`, '/home/melangakasun/.seadrive/data', userDir, 
-                        async () => {
-                            // Creating a unique salt for a particular user 
-                            let salt: string = crypto.randomBytes(16).toString('hex'); 
-                            // Hashing user's salt and password with 1000 iterations, 
-                            let hash: string = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+                    mountSeadrive(`${baseDir}/${username}/seadrive.conf`, '/home/melangakasun/.seadrive/data', userDir, () => {
+                        // Creating a unique salt for a particular user 
+                        let salt: string = crypto.randomBytes(16).toString('hex'); 
+                        // Hashing user's salt and password with 1000 iterations, 
+                        let hash: string = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
 
-                            // Saving user data in Redis
-                            console.log(`Adding User: ${username} to the database...`);
-                            let user: User = new User(username, salt, hash, '', true);
-                            users.add(user);
-                            await jsonCache.set('users', users);
-                            console.log(`Successfully logged in...`);
-                            res.statusCode = 200;
-                        }, 
-                        `${baseDir}/${username}/seadrive.log`, true);
+                        // Saving user data in Redis
+                        console.log(`Adding User: ${username} to the database...`);
+                        let user: User = new User(username, password, userDir, true);
+                        let newUser = {"Username": username, "Password": password, "Scope": userDir, "Modify": "true"};
+                        users.set(username, user);
+                        // await jsonCache.set('users', users);
+                        redisClient.hset('users', username, JSON.stringify(newUser), (error, reply) => {
+                            if (error) {
+                                console.error(error);                                    
+                            }
+                        });
+                        console.log(`Successfully logged in...`);
+                        res.statusCode = 200;
+                    }, 
+                    `${baseDir}/${username}/seadrive.log`, true);
                 } catch(error) {
                     console.error(`An error occurred... ${error}`);
                     res.statusCode = 500;
@@ -82,4 +86,4 @@ app.post('/login', async function (req, res) {
     });
 });
 
-app.listen(1902);
+app.listen(1901);

@@ -1,16 +1,15 @@
 export class User {
-    username: string;
-    salt: string;
-    password: string;
-    scope: string;
-    modify: boolean;
+    Username: string;
+    // salt: string;
+    Password: string;
+    Scope: string;
+    Modify: boolean;
     
-    constructor(username: string, salt: string, password: string, scope: string, modify: boolean) {
-        this.username = username;
-        this.salt = salt;
-        this.password = password;
-        this.scope = scope;
-        this.modify = modify;
+    constructor(username: string, password: string, scope: string, modify: boolean) {
+        this.Username = username;
+        this.Password = password;
+        this.Scope = scope;
+        this.Modify = modify;
     }
 }
 
