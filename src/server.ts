@@ -53,6 +53,22 @@ app.post('/login', async function (req, res) {
                         // creating the seadrive.conf file
                         console.log(`Creating the configuration file...`);
                         createConfig(`${base_directory}/${username}/seadrive.conf`, host, username, opt.token, username);
+                    } else {
+                        fs.readFile(`${base_directory}/${username}/seadrive.conf`, 'utf8', (error, data) => {
+                            if (error) {
+                                console.error(error);                                
+                            } else if (data) {
+                                try {
+                                    var old_token: string = data.split('\n')[3].substring(8);   
+                                    if (old_token !== opt.token) {
+                                        console.log(`Updating the configuration file...`);
+                                        updateConfigurationFile(`${base_directory}/${username}/seadrive.conf`, data, old_token, opt.token);
+                                    }
+                                } catch (error) {
+                                    console.error(error);
+                                }
+                            }                         
+                        });
                     }
                     // Mounting the directory
                     console.log(`Mounting with the Seadrive directory...`);
@@ -87,7 +103,6 @@ function mountDirectoriesForSavedUsers(): void {
         if (error) {
             console.error(error);            
         } else if (data) {
-            console.log(data);  
             for (let [key, value] of Object.entries(data)) {
                 try {
                     let user_data = JSON.parse(value);
@@ -122,4 +137,13 @@ async function unmountDirectory(directory: string) {
     } catch (error) {
         console.error(error);  
     }   
+}
+
+function updateConfigurationFile(file_name: string, content: string, old_token: string, new_token: string) {
+    var result = content.replace(old_token, new_token);
+    fs.writeFile(file_name, result, 'utf8', function (error) {
+        if (error) {
+            console.error(error);
+        }
+    });
 }
