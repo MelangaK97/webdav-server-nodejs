@@ -8,6 +8,7 @@ import fs from 'fs';
 import redis from 'redis';
 import * as crypto from 'crypto';
 import { exec } from 'child_process';
+import bcrypt from 'bcrypt';
 
 const host = 'http://localhost:7080';
 const data_directory = '/home/melangakasun/.seadrive/data';
@@ -121,10 +122,18 @@ function mountDirectoriesForSavedUsers(): void {
 
 function saveUserInRedis(username: string, password: string, directory: string): void {
     console.log(`Adding User: ${username} to the database...`);
-    let new_user = {"Username": username, "Password": password, "Scope": directory};
-    redis_client.hset('users', username, JSON.stringify(new_user), (error, reply) => {
-        if (error) {
-            console.error(error);                                    
+    bcrypt.hash(password, 10, function(err: any, hash: string) {
+        if (err) {
+            console.error(err);           
+        } else if (hash) { 
+            let new_user = {"Username": username, "Password": `{bcrypt}${hash}`, "Scope": directory};
+            redis_client.hset('users', username, JSON.stringify(new_user), (error, reply) => {
+                if (error) {
+                    console.error(error);                                    
+                } else {
+                    console.log(`User: ${username} saved in the database...`);                    
+                }
+            });                   
         }
     });
 }
