@@ -23,16 +23,17 @@ app.use(bodyParser.json());
 
 const redis_client = redis.createClient(redis_port);
 
-app.post('/login', async function (req, res) {
+app.post('/login', async (req, res) => {
     let username: string = req.body.username;
     let password: string = req.body.password;
-    console.log(`Login request... Username: ${username}, Password: ${password}`);
+    console.log(`Login request... Username: ${username}`);
     let response: any;
     
     // check if user already registered
     getToken(host, username, password, async (error: any, stdout: any, stderr: any) => {
         if (error) {
             console.error(`An error occurred... Username: ${username}, ${error}`);
+            response = error;
             res.statusCode = 500;
         }
         if (stdout) {
@@ -84,8 +85,8 @@ app.post('/login', async function (req, res) {
                     // await jsonCache.set('users', users);
                     saveUserInRedis(username, password, user_directory);
                     console.log(`Successfully logged in...`);
-                    res.statusCode = 200;
-                    
+                    response = 'Successfully logged in';    
+                    res.statusCode = 200;               
                 } catch(error) {
                     console.error(`An error occurred... ${error}`);
                     response = error;
@@ -95,6 +96,40 @@ app.post('/login', async function (req, res) {
         }
         res.send(response);
     });
+});
+
+app.delete('/remove', (req, res) => {
+    let username: string = req.body.username;
+    console.log(`Logout request... Username: ${username}`);
+    let response: any;
+
+    // check if user already registered
+    redis_client.hget('users', username, (error, reply) => {
+        if (error) {
+            console.error(error);      
+            response = error;
+            res.statusCode = 500;      
+        } else if (reply) {
+            let opt: any = JSON.parse(reply);
+            redis_client.hdel('users', username, (error, reply) => {
+                if (error) {
+                    console.error(error);     
+                    response = error;
+                    res.statusCode = 500;             
+                } else {
+                    unmountDirectory(opt.Scope);
+                    console.log(`Successfully removed the user... Username: ${username}`);
+                    response = 'Successfully removed the user';
+                    res.statusCode = 200;   
+                }
+            });
+        } else {
+            console.error(`User: ${username} is not available...`);
+            response = 'User not found';
+            res.statusCode = 404;
+        }
+    });
+    res.send(response);
 });
 
 app.listen(server_port, () => mountDirectoriesForSavedUsers());
