@@ -5,23 +5,20 @@ import mountSeadrive from './seafile_utils/mountSeadrive';
 import createConfig from './seafile_utils/createConfig';
 import getToken from './seafile_utils/getToken';
 import fs from 'fs';
-import redis from 'redis';
 import * as crypto from 'crypto';
-import { exec } from 'child_process';
 import bcrypt from 'bcrypt';
+import unmountDirectory from './system_utils/unmountDirectory';
+import { saveUser, getAllUsers, getUser, deleteUser } from './system_utils/redis';
 
 const host = 'http://localhost:7080';
 const data_directory = '/home/melangakasun/.seadrive/data';
 const base_directory = '/home/melangakasun/Desktop/FYP/test';
 const realm = 'Seadrive';
 const server_port = 1901;
-const redis_port = 6379;
  
 const app = express();
 app.use(bodyParser.urlencoded());
 app.use(bodyParser.json());
-
-const redis_client = redis.createClient(redis_port);
 
 app.post('/login', async (req, res) => {
     let username: string = req.body.username;
@@ -98,26 +95,26 @@ app.post('/login', async (req, res) => {
     });
 });
 
-app.delete('/remove', (req, res) => {
+app.delete('/remove', async (req, res) => {
     let username: string = req.body.username;
     console.log(`Logout request... Username: ${username}`);
     let response: any;
 
     // check if user already registered
-    redis_client.hget('users', username, (error, reply) => {
+    getUser(username, (error: Error | null, user_data: string) => {
         if (error) {
             console.error(error);      
             response = error;
             res.statusCode = 500;      
-        } else if (reply) {
-            let opt: any = JSON.parse(reply);
-            redis_client.hdel('users', username, (error, reply) => {
+        } else if (user_data) {
+            let user: any = JSON.parse(user_data);
+            deleteUser(username, (error: Error | null, reply: string) => {
                 if (error) {
                     console.error(error);     
                     response = error;
                     res.statusCode = 500;             
                 } else {
-                    unmountDirectory(opt.Scope);
+                    unmountDirectory(user.Scope);
                     console.log(`Successfully removed the user... Username: ${username}`);
                     response = 'Successfully removed the user';
                     res.statusCode = 200;   
@@ -134,53 +131,21 @@ app.delete('/remove', (req, res) => {
 
 app.listen(server_port, () => mountDirectoriesForSavedUsers());
 
-function mountDirectoriesForSavedUsers(): void {
-    redis_client.hgetall('users', async (error, data) => {
-        if (error) {
-            console.error(error);            
-        } else if (data) {
-            for (let [key, value] of Object.entries(data)) {
-                try {
-                    let user_data = JSON.parse(value);
-                    await unmountDirectory(user_data.Scope);
-                    mountSeadrive(`${base_directory}/${key}/seadrive.conf`, data_directory, user_data.Scope, () => {
-                        console.log(`Mounted directory for ${key} successfully...`);                        
-                    },
-                    `${base_directory}/${key}/seadrive.log`, true);
-                } catch (error) {
-                    console.error(error);                    
-                }
-            }          
-        }
+async function mountDirectoriesForSavedUsers(): Promise<void> {
+    getAllUsers(async (user_list: { [s: string]: string }) => {
+        for (let [username, user_data] of Object.entries(user_list)) {
+            try {
+                let user = JSON.parse(user_data);
+                await unmountDirectory(user.Scope);
+                mountSeadrive(`${base_directory}/${username}/seadrive.conf`, data_directory, user.Scope, () => {
+                    console.log(`Mounted directory for ${username} successfully...`);                        
+                },
+                `${base_directory}/${username}/seadrive.log`, true);
+            } catch (error) {
+                console.error(error);                    
+            }
+        } 
     });
-}
-
-function saveUserInRedis(username: string, password: string, directory: string): void {
-    console.log(`Adding User: ${username} to the database...`);
-    bcrypt.hash(password, 10, function(err: any, hash: string) {
-        if (err) {
-            console.error(err);           
-        } else if (hash) { 
-            let new_user = {"Username": username, "Password": `{bcrypt}${hash}`, "Scope": directory};
-            redis_client.hset('users', username, JSON.stringify(new_user), (error, reply) => {
-                if (error) {
-                    console.error(error);                                    
-                } else {
-                    console.log(`User: ${username} saved in the database...`);                    
-                }
-            });                   
-        }
-    });
-}
-
-async function unmountDirectory(directory: string) {
-    try {
-        let command: string = `fusermount -uz ${directory}`
-        exec(command);   
-        console.log(`${directory} is unmounted successfully...`);
-    } catch (error) {
-        console.error(error);  
-    }   
 }
 
 function updateConfigurationFile(file_name: string, content: string, old_token: string, new_token: string) {
@@ -188,6 +153,17 @@ function updateConfigurationFile(file_name: string, content: string, old_token: 
     fs.writeFile(file_name, result, 'utf8', function (error) {
         if (error) {
             console.error(error);
+        }
+    });
+}
+function saveUserInRedis(username: string, password: string, directory: string) {
+    console.log(`Adding User: ${username} to the database...`);
+    bcrypt.hash(password, 10, function(err: any, hash: string) {
+        if (err) {
+            console.error(err);           
+        } else if (hash) { 
+            let new_user = {"Username": username, "Password": `{bcrypt}${hash}`, "Scope": directory};
+            saveUser(username, JSON.stringify(new_user));
         }
     });
 }
