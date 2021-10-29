@@ -9,6 +9,8 @@ import * as crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import unmountDirectory from './system_utils/unmountDirectory';
 import { saveUser, getAllUsers, getUser, deleteUser } from './system_utils/redis';
+import { exec } from 'child_process';
+import deleteDirectory from './system_utils/deleteDirectory';
 
 const host = 'http://localhost:7080';
 const data_directory = '/home/melangakasun/.seadrive/data';
@@ -115,6 +117,7 @@ app.delete('/remove', async (req, res) => {
                     res.statusCode = 500;             
                 } else {
                     unmountDirectory(user.Scope);
+                    deleteDirectory(user.Scope);
                     console.log(`Successfully removed the user... Username: ${username}`);
                     response = 'Successfully removed the user';
                     res.statusCode = 200;   
@@ -156,6 +159,7 @@ function updateConfigurationFile(file_name: string, content: string, old_token: 
         }
     });
 }
+
 function saveUserInRedis(username: string, password: string, directory: string) {
     console.log(`Adding User: ${username} to the database...`);
     bcrypt.hash(password, 10, function(err: any, hash: string) {
