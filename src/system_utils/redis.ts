@@ -7,11 +7,11 @@ const redis_client = redis.createClient(redis_port);
 export function saveUser(username: string, user_data: string): void {
     redis_client.hset('users', username, user_data, (error, reply) => {
         if (error) {
-            console.error(error);                                    
+            console.error(error);
         } else {
-            console.log(`User: ${username} saved in the database...`);                    
+            console.log(`User: ${username} saved in the database...`);
         }
-    });                   
+    });
 }
 
 export function getUser(username: string, callback: Function) {
@@ -23,7 +23,7 @@ export function getUser(username: string, callback: Function) {
 export function getAllUsers(callback: Function) {
     redis_client.hgetall('users', (error, data) => {
         if (error) {
-            console.error(error);            
+            console.error(error);
         } else if (data) {
             callback(data);
         }
@@ -33,5 +33,25 @@ export function getAllUsers(callback: Function) {
 export function deleteUser(username: string, callback: Function) {
     redis_client.hdel('users', username, (error, reply) => {
         callback(error, reply);
+    });
+}
+
+export function scheduleDownload(file: string, schedule_data: string): void {
+    redis_client.hset('shedulers', file, schedule_data, (error, reply) => {
+        if (error) {
+            console.error(error);
+        } else {
+            console.log(`File: ${file} saved in the database...`);
+        }
+    });
+}
+
+export function getAllSchedulers(callback: Function) {
+    redis_client.hgetall('shedulers', (error, data) => {
+        if (error) {
+            console.error(error);
+        } else if (data) {
+            callback(data);
+        }
     });
 }

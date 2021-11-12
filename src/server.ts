@@ -13,7 +13,7 @@ import * as crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import cron from 'node-cron';
 import unmountDirectory from './system_utils/unmountDirectory';
-import { saveUser, getAllUsers, getUser, deleteUser } from './system_utils/redis';
+import { saveUser, getAllUsers, getUser, deleteUser, scheduleDownload } from './system_utils/redis';
 import deleteDirectory from './system_utils/deleteDirectory';
 
 declare module 'express-session' {
@@ -222,18 +222,20 @@ app.get('/schedule', async (req, res) => {
             const [hour, minute] = JSON.stringify(time).slice(1, -1).split(':');
             const date = new Date(JSON.stringify(day));
             if (fs.existsSync(file)) {
-                cron.schedule(`${minute} ${hour} ${date.getDate()} ${date.getMonth() + 1} ${date.getDay()}`, () => {
-                    console.log(`Downloading file: ${filename}`);
-                    fs.readFile(file, 'utf8', (error, data) => {
-                        if (error) {
-                            console.error(error);
-                            res.status(500).send({ error });
-                        } else if (data) {
-                            console.log(`Successfully downloaded file: ${filename}`);
-                            res.status(200).send({ download: true });
-                        }
-                    });
-                });
+                let schedule_data = { file, minute, hour, date: date.getDate(), month: date.getMonth() + 1, day_of_week: date.getDay() };
+                scheduleDownload(file, JSON.stringify(schedule_data));
+                // cron.schedule(`${minute} ${hour} ${date.getDate()} ${date.getMonth() + 1} ${date.getDay()}`, () => {
+                //     console.log(`Downloading file: ${filename}`);
+                //     fs.readFile(file, 'utf8', (error, data) => {
+                //         if (error) {
+                //             console.error(error);
+                //             res.status(500).send({ error });
+                //         } else if (data) {
+                //             console.log(`Successfully downloaded file: ${filename}`);
+                //             res.status(200).send({ download: true });
+                //         }
+                //     });
+                // });
             } else {
                 res.status(404).send({ error: 'File not exists' });
             }
