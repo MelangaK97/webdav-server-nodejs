@@ -13,7 +13,7 @@ import * as crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import cron from 'node-cron';
 import unmountDirectory from './system_utils/unmountDirectory';
-import { saveUser, getAllUsers, getUser, deleteUser, scheduleDownload } from './system_utils/redis';
+import { saveUser, getAllUsers, getUser, deleteUser, scheduleDownload, getAllSchedulers, deleteScheduler } from './system_utils/redis';
 import deleteDirectory from './system_utils/deleteDirectory';
 
 declare module 'express-session' {
@@ -219,23 +219,10 @@ app.get('/schedule', async (req, res) => {
     if (username && filename && day && time) {
         try {
             let file: string = `${base_directory}/${username}/data${filename}`;
-            const [hour, minute] = JSON.stringify(time).slice(1, -1).split(':');
-            const date = new Date(JSON.stringify(day));
             if (fs.existsSync(file)) {
-                let schedule_data = { file, minute, hour, date: date.getDate(), month: date.getMonth() + 1, day_of_week: date.getDay() };
+                let schedule_data = { file, date: new Date(JSON.stringify(day)).toLocaleDateString(), time };
                 scheduleDownload(file, JSON.stringify(schedule_data));
-                // cron.schedule(`${minute} ${hour} ${date.getDate()} ${date.getMonth() + 1} ${date.getDay()}`, () => {
-                //     console.log(`Downloading file: ${filename}`);
-                //     fs.readFile(file, 'utf8', (error, data) => {
-                //         if (error) {
-                //             console.error(error);
-                //             res.status(500).send({ error });
-                //         } else if (data) {
-                //             console.log(`Successfully downloaded file: ${filename}`);
-                //             res.status(200).send({ download: true });
-                //         }
-                //     });
-                // });
+                res.status(200).send({ download: true });
             } else {
                 res.status(404).send({ error: 'File not exists' });
             }
@@ -298,7 +285,10 @@ app.delete('/remove', async (req, res) => {
     res.send(response);
 });
 
-app.listen(server_port, () => mountDirectoriesForSavedUsers());
+app.listen(server_port, () => {
+    mountDirectoriesForSavedUsers();
+    dowloadScheduledFiles();
+});
 
 async function mountDirectoriesForSavedUsers(): Promise<void> {
     try {
@@ -319,6 +309,38 @@ async function mountDirectoriesForSavedUsers(): Promise<void> {
     } catch (error) {
         console.error(error);
     }
+}
+
+function dowloadScheduledFiles() {
+    cron.schedule('* * * * *', () => {
+        getAllSchedulers((schedulers: { [s: string]: string; }) => {
+            let current = new Date();
+            let time = current.toTimeString().substring(0, 5);
+            for (let [filename, file_data] of Object.entries(schedulers)) {
+                try {
+                    let scheduled_file = JSON.parse(file_data);
+                    if (current.toLocaleDateString() == scheduled_file.date && time >= scheduled_file.time) {
+                        console.log('Date Matched !', time, scheduled_file);
+                        deleteScheduler(filename);
+                        if (fs.existsSync(filename)) {
+                            console.log(`Downloading file: ${filename}`);
+                            fs.readFile(filename, 'utf8', (error, data) => {
+                                if (error) {
+                                    console.error(error);
+                                } else if (data) {
+                                    console.log(`Successfully downloaded file: ${filename}`);
+                                }
+                            });
+                        } else {
+                            console.log('File not exists');
+                        }
+                    }
+                } catch (error) {
+                    console.error(error);
+                }
+            }
+        });
+    });
 }
 
 function updateConfigurationFile(file_name: string, content: string, old_token: string, new_token: string) {

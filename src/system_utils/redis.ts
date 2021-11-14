@@ -55,3 +55,13 @@ export function getAllSchedulers(callback: Function) {
         }
     });
 }
+
+export function deleteScheduler(filename: string) {
+    redis_client.hdel('shedulers', filename, (error, reply) => {
+        if (error) {
+            console.error(error);
+        } else if (reply) {
+            console.log(`Successfully deleted the file ${filename}`);
+        }
+    });
+}
