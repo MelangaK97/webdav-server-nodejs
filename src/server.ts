@@ -15,6 +15,7 @@ import cron from 'node-cron';
 import unmountDirectory from './system_utils/unmountDirectory';
 import { saveUser, getAllUsers, getUser, deleteUser, scheduleDownload, getAllSchedulers, deleteScheduler } from './system_utils/redis';
 import deleteDirectory from './system_utils/deleteDirectory';
+import { ExecException } from 'child_process';
 
 declare module 'express-session' {
     export interface SessionData {
@@ -88,7 +89,7 @@ app.post('/register', (req, res) => {
                                     var old_token: string = data.split('\n')[3].substring(8);
                                     if (old_token !== opt.token) {
                                         console.log(`Updating the configuration file...`);
-                                        updateConfigurationFile(`${base_directory}/${username}/seadrive.conf`, data, old_token, opt.token);
+                                        updateConfigurationFile(`${base_directory}/${username}/seadrive.conf`, opt.token);
                                     }
                                 } catch (error) {
                                     console.error(error);
@@ -129,25 +130,71 @@ app.post('/login', async (req, res) => {
     let password: string = req.body.password;
     console.log(`Login request... Username: ${username}`);
 
-    // check if user already registered
-    getToken(host, username, password, async (error: any, stdout: any, stderr: any) => {
+    // check user is registered
+    getUser(username, (error: Error | null, data: string) => {
         if (error) {
-            console.error(error);
-            res.status(500).send({ error });
+            console.error(`An error occurred... ${error.message}`);
+            res.status(500).send({ error: error.message });
+        } else if (data) {
+            let user_data = JSON.parse(data);
+            // get access token from server
+            getToken(host, username, password, (error: ExecException | null, stdout: string, stderr: string) => {
+                if (stdout) {
+                    let opt: any = JSON.parse(stdout);
+                    if (opt.non_field_errors) {
+                        bcrypt.compare(password, user_data.Password, (error, reply) => {
+                            if (error) {
+                                console.error(`An error occurred... ${error.message}`);
+                                res.status(500).send({ error: error.message });
+                            } else if (reply) {
+                                // Server password changed but not updated the SyncBox
+                                console.error(`${username} has changed the server password...`);
+                                res.status(401).send({ error: 'Server password is changed' });
+                            } else {
+                                console.error(`An error occurred... ${opt.non_field_errors}`);
+                                res.status(401).send({ error: opt.non_field_errors });
+                            }
+                        });
+                    } else if (opt.token) {
+                        bcrypt.compare(password, user_data.Password, (error, reply) => {
+                            if (!reply) {
+                                // update the SyncBox password and configuration file
+                                saveUserInRedis(username, password, `${base_directory}/${username}/data`);
+                                updateConfigurationFile(`${base_directory}/${username}/seadrive.conf`, opt.token);
+                            }
+                            console.log(`Successfully logged in... Username: ${username}, Token: ${opt.token}`);
+                            req.session.user = { name: username, token: opt.token };
+                            res.status(200).send({ token: opt.token });
+                        });
+                    }
+                } else {
+                    // cannot connect to the server
+                    console.error(error?.message);
+                    bcrypt.compare(password, user_data.Password, (error, reply) => {
+                        if (error) {
+                            console.error(`An error occurred... ${error.message}`);
+                            res.status(500).send({ error: error.message });
+                        } else if (reply) {
+                            let { token, error } = getTokenFromConfigFile(username);
+                            if (error) {
+                                console.error(`An error occurred... ${error}`);
+                                res.status(500).send({ error });
+                            } else if (token) {
+                                console.log(`Successfully logged in... Username: ${username}, Token: ${token}`);
+                                req.session.user = { name: username, token };
+                                res.status(200).send({ token });
+                            }
+                        } else {
+                            console.error('Incorrect credentials');
+                            res.status(401).send({ error: 'Incorrect credentials' });
+                        }
+                    });
+                }
+            });
+        } else {
+            console.error(`User: ${username} is not registered`);
+            res.status(500).send({ error: `User: ${username} is not registered` });
         }
-        if (stdout) {
-            let opt: any = JSON.parse(stdout);
-            if (opt.non_field_errors) {
-                console.error(`An error occurred... Username: ${username}, Error: ${opt.non_field_errors}`);
-                console.error(error);
-                res.status(401).send({ error: opt.non_field_errors });
-            } else if (opt.token) {
-                console.log(`Successfully logged in... Username: ${username}, Token: ${opt.token}`);
-                req.session.user = { name: username, token: opt.token };
-                res.status(200).send({ token: opt.token });
-            }
-        }
-        res.status(500).send();
     });
 });
 
@@ -343,13 +390,23 @@ function dowloadScheduledFiles() {
     });
 }
 
-function updateConfigurationFile(file_name: string, content: string, old_token: string, new_token: string) {
-    var result = content.replace(old_token, new_token);
-    fs.writeFile(file_name, result, 'utf8', function (error) {
-        if (error) {
-            console.error(error);
-        }
-    });
+function updateConfigurationFile(file_name: string, new_token: string) {
+    try {
+        fs.readFile(file_name, 'utf8', (error, content) => {
+            if (error) {
+                console.error(`An error occurred... ${error.message}`);
+            } else if (content) {
+                let old_token = content.split('\n')[3].substring(8);
+                fs.writeFile(file_name, content.replace(old_token, new_token), 'utf8', (error) => {
+                    if (error) {
+                        console.error(`An error occurred... ${error.message}`);
+                    }
+                });
+            }
+        });
+    } catch (error) {
+        console.error(`An error occurred... ${error}`);
+    }
 }
 
 function saveUserInRedis(username: string, password: string, directory: string) {
@@ -360,6 +417,17 @@ function saveUserInRedis(username: string, password: string, directory: string) 
         } else if (hash) {
             let new_user = { "Username": username, "Password": `{bcrypt}${hash}`, "Scope": directory };
             saveUser(username, JSON.stringify(new_user));
+        }
+    });
+}
+
+function getTokenFromConfigFile(username: string): any {
+    fs.readFile(`${base_directory}/${username}/seadrive.conf`, 'utf8', (error, data) => {
+        if (error) {
+            console.error(error);
+            return { error: 'Unable to access the configuration file' };
+        } else if (data) {
+            return { token: data.split('\n')[3].substring(8) };
         }
     });
 }
