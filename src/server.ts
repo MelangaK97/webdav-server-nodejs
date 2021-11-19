@@ -277,36 +277,30 @@ const convertBytes = (bytes: number) => {
 app.delete('/remove', async (req, res) => {
     let username: string = req.body.username;
     console.log(`Logout request... Username: ${username}`);
-    let response: any;
 
     // check if user already registered
-    getUser(username, (error: Error | null, user_data: string) => {
+    getUser(username, (error: Error | null, data: string) => {
         if (error) {
-            console.error(error);
-            response = error;
-            res.statusCode = 500;
-        } else if (user_data) {
-            let user: any = JSON.parse(user_data);
+            console.error(error.message);
+            res.status(500).send({ error: error.message });
+        } else if (data) {
+            let user_data: any = JSON.parse(data);
             deleteUser(username, (error: Error | null, reply: string) => {
                 if (error) {
-                    console.error(error);
-                    response = error;
-                    res.statusCode = 500;
+                    console.error(error.message);
+                    res.status(500).send({ error: error.message });
                 } else {
-                    unmountDirectory(user.Scope);
-                    deleteDirectory(user.Scope);
+                    unmountDirectory(user_data.Scope);
+                    deleteDirectory(user_data.Scope);
                     console.log(`Successfully removed the user... Username: ${username}`);
-                    response = 'Successfully removed the user';
-                    res.statusCode = 200;
+                    res.status(200).send({ response: 'Successfully removed the user' });
                 }
             });
         } else {
             console.error(`User: ${username} is not available...`);
-            response = 'User not found';
-            res.statusCode = 404;
+            res.status(404).send({ error: 'User not found' });
         }
     });
-    res.send(response);
 });
 
 app.listen(server_port, () => {
