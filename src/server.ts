@@ -23,9 +23,9 @@ declare module 'express-session' {
     }
 }
 
-const host = 'http://localhost:7080';
-const data_directory = '/home/melangakasun/.seadrive/data';
-const base_directory = '/home/melangakasun/Desktop/FYP/test';
+const host = 'http://www.nextbox.lk:81/';
+const data_directory = '/home/evindu/.seadrive/data';
+const base_directory = '/home/evindu/syncbox-data';
 const realm = 'Seadrive';
 const server_port = 1901;
 
