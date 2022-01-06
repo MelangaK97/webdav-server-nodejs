@@ -26,6 +26,7 @@ declare module 'express-session' {
 const host = 'http://www.nextbox.lk:81/';
 const data_directory = '/home/evindu/.seadrive/data';
 const base_directory = '/home/evindu/syncbox-data';
+const config_file_location = '/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml';
 const realm = 'Seadrive';
 const server_port = 1901;
 
@@ -360,7 +361,7 @@ function dowloadScheduledFiles() {
 
 function getUserFromConfigFile(username: string): any {
     try {
-        let data: any = yaml.load(fs.readFileSync('/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml', 'utf8'));
+        let data: any = yaml.load(fs.readFileSync(config_file_location, 'utf8'));
         let users = data.users ? data.users : [];
         for (let i = 0; i < users.length; i++) {
             let user_object = users[i];
@@ -377,7 +378,7 @@ function getUserFromConfigFile(username: string): any {
 
 function updateUserPassword(username: string, password: string) {
     try {
-        let data: any = yaml.load(fs.readFileSync('/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml', 'utf8'));
+        let data: any = yaml.load(fs.readFileSync(config_file_location, 'utf8'));
         let users = data.users ?? [];
 
         for (let i = 0; i < users.length; i++) {
@@ -390,7 +391,7 @@ function updateUserPassword(username: string, password: string) {
                         user_object.password = `{bcrypt}${hash}`;
                         data.users[i] = user_object;
                         let yaml_string = yaml.dump(data);
-                        fs.writeFileSync('/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml', yaml_string, 'utf8');
+                        fs.writeFileSync(config_file_location, yaml_string, 'utf8');
                         console.log(`Successfully updated the password of ${username}...`);
                     }
                 });
@@ -404,7 +405,7 @@ function updateUserPassword(username: string, password: string) {
 
 function saveUserAndPassword(username: string, password: string, directory: string) {
     try {
-        let data: any = yaml.load(fs.readFileSync('/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml', 'utf8'));
+        let data: any = yaml.load(fs.readFileSync(config_file_location, 'utf8'));
         let user_count = data.users ? data.users.length : 0;
         bcrypt.hash(password, 10, function (err: any, hash: string) {
             if (err) {
@@ -412,7 +413,7 @@ function saveUserAndPassword(username: string, password: string, directory: stri
             } else if (hash) {
                 data.users[user_count] = { username, password: `{bcrypt}${hash}`, rules: { path: directory, modify: true } };
                 let yaml_string = yaml.dump(data);
-                fs.writeFileSync('/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml', yaml_string, 'utf8');
+                fs.writeFileSync(config_file_location, yaml_string, 'utf8');
                 console.log(`Successfully updated the password of ${username}...`);
             }
         });
