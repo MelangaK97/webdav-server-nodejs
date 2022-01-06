@@ -9,9 +9,9 @@ import createConfig from './seafile_utils/createConfig';
 import getToken from './seafile_utils/getToken';
 import path from 'path';
 import fs from 'fs';
-import * as crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import cron from 'node-cron';
+import yaml from 'js-yaml';
 import unmountDirectory from './system_utils/unmountDirectory';
 import { saveUser, getAllUsers, getUser, deleteUser, scheduleDownload, getAllSchedulers, deleteScheduler } from './system_utils/redis';
 import deleteDirectory from './system_utils/deleteDirectory';
@@ -54,125 +54,126 @@ app.post('/register', (req, res) => {
     let username: string = req.body.username;
     let password: string = req.body.password;
     console.log(`Register request... Username: ${username}`);
+    let data: any = getUserFromConfigFile(username);
 
     // check user is registered
-    getUser(username, (error: Error | null, data: string) => {
-        if (error) {
-            console.error(`An error occurred... ${error.message}`);
-            res.status(500).send({ error: error.message });
-        } else if (data) {
-            console.error(`User: ${username} is already registered`);
-            res.status(500).send({ error: `User: ${username} is already registered` });
-        } else {
-            // get access token from server
-            getToken(host, username, password, (error: ExecException | null, stdout: string, stderr: string) => {
-                if (stdout) {
-                    let opt: any = JSON.parse(stdout);
-                    if (opt.non_field_errors) {
-                        console.error(opt.non_field_errors);
-                        res.status(401).send({ error: 'Unable to register with the provided credentials' });
-                    } else if (opt.token) {
-                        console.log(`Successfully logged in... Username: ${username}, Token: ${opt.token}`);
-                        let user_directory: string = `${base_directory}/${username}`;
-                        if (!fs.existsSync(`${user_directory}/data`)) {
-                            // creating a directory for the user
-                            console.log(`Creating directory... ${user_directory}/data`);
-                            fs.mkdirSync(`${user_directory}/data`, { recursive: true });
-                        }
-                        if (!fs.existsSync(`${user_directory}/seadrive.conf`)) {
-                            // creating the seadrive.conf file for the user
-                            console.log(`Creating the configuration file...`);
-                            createConfig(`${user_directory}/seadrive.conf`, host, username, opt.token, username);
-                        }
-                        // Mounting the directory
-                        console.log(`Mounting with the Seadrive directory...`);
-                        mountSeadrive(`${user_directory}/seadrive.conf`, data_directory, `${user_directory}/data`, `${user_directory}/seadrive.log`, true);
-                        // await jsonCache.set('users', users);
-                        saveUserInRedis(username, password, `${user_directory}/data`);
-                        console.log(`Successfully logged in...`);
-                        req.session.user = { name: username, token: opt.token };
-                        res.status(200).send({ token: opt.token });
+    if (data?.error) {
+        console.error(`An error occurred... ${data.error.message}`);
+        res.status(500).send({ error: data.error.message });
+    } else if (data?.user) {
+        console.error(`User: ${username} is already registered`);
+        res.status(500).send({ error: `User: ${username} is already registered` });
+    } else {
+        // get access token from server
+        getToken(host, username, password, (error: ExecException | null, stdout: string, stderr: string) => {
+            if (stdout) {
+                let opt: any = JSON.parse(stdout);
+                if (opt.non_field_errors) {
+                    console.error(opt.non_field_errors);
+                    res.status(401).send({ error: 'Unable to register with the provided credentials' });
+                } else if (opt.token) {
+                    console.log(`Successfully logged in... Username: ${username}, Token: ${opt.token}`);
+                    let user_directory: string = `${base_directory}/${username}`;
+                    if (!fs.existsSync(`${user_directory}/data`)) {
+                        // creating a directory for the user
+                        console.log(`Creating directory... ${user_directory}/data`);
+                        fs.mkdirSync(`${user_directory}/data`, { recursive: true });
                     }
-                } else {
-                    console.error(error ? error.message : stderr);
-                    res.status(500).send({ error: error ? error.message : stderr });
+                    if (!fs.existsSync(`${user_directory}/seadrive.conf`)) {
+                        // creating the seadrive.conf file for the user
+                        console.log(`Creating the configuration file...`);
+                        createConfig(`${user_directory}/seadrive.conf`, host, username, opt.token, username);
+                    }
+                    // Mounting the directory
+                    console.log(`Mounting with the Seadrive directory...`);
+                    mountSeadrive(`${user_directory}/seadrive.conf`, data_directory, `${user_directory}/data`, `${user_directory}/seadrive.log`, true);
+                    // await jsonCache.set('users', users);
+                    // saveUserInRedis(username, password, `${user_directory}/data`);
+                    saveUserAndPassword(username, password, `${user_directory}/data`);
+                    console.log(`Successfully logged in...`);
+                    req.session.user = { name: username, token: opt.token };
+                    res.status(200).send({ token: opt.token });
                 }
-            });
-        }
-    });
+            } else {
+                console.error(error ? error.message : stderr);
+                res.status(500).send({ error: error ? error.message : stderr });
+            }
+        });
+    }
 });
 
 app.post('/login', async (req, res) => {
     let username: string = req.body.username;
     let password: string = req.body.password;
     console.log(`Login request... Username: ${username}`);
+    let data: any = getUserFromConfigFile(username);
+    // updateUserPassword(username, '123');
 
     // check user is registered
-    getUser(username, (error: Error | null, data: string) => {
-        if (error) {
-            console.error(`An error occurred... ${error.message}`);
-            res.status(500).send({ error: error.message });
-        } else if (data) {
-            let user_data = JSON.parse(data);
-            // get access token from server
-            getToken(host, username, password, (error: ExecException | null, stdout: string, stderr: string) => {
-                if (stdout) {
-                    let opt: any = JSON.parse(stdout);
-                    if (opt.non_field_errors) {
-                        bcrypt.compare(password, user_data.Password, (error, reply) => {
-                            if (error) {
-                                console.error(`An error occurred... ${error.message}`);
-                                res.status(500).send({ error: error.message });
-                            } else if (reply) {
-                                // Server password changed but not updated the SyncBox
-                                console.error(`${username} has changed the server password...`);
-                                res.status(401).send({ error: 'Server password is changed' });
-                            } else {
-                                console.error(`An error occurred... ${opt.non_field_errors}`);
-                                res.status(401).send({ error: opt.non_field_errors });
-                            }
-                        });
-                    } else if (opt.token) {
-                        bcrypt.compare(password, user_data.Password, (error, reply) => {
-                            if (!reply) {
-                                // update the SyncBox password and configuration file
-                                saveUserInRedis(username, password, `${base_directory}/${username}/data`);
-                                updateConfigurationFile(`${base_directory}/${username}/seadrive.conf`, opt.token);
-                            }
-                            console.log(`Successfully logged in... Username: ${username}, Token: ${opt.token}`);
-                            req.session.user = { name: username, token: opt.token };
-                            res.status(200).send({ token: opt.token });
-                        });
-                    }
-                } else {
-                    // cannot connect to the server
-                    console.error(error?.message);
-                    bcrypt.compare(password, user_data.Password, (error, reply) => {
+    if (data?.error) {
+        console.error(`An error occurred... ${data.error.message}`);
+        res.status(500).send({ error: data.error.message });
+    } else if (data?.user) {
+        let user_data = data.user;
+        // get access token from server
+        getToken(host, username, password, (error: ExecException | null, stdout: string, stderr: string) => {
+            if (stdout) {
+                let opt: any = JSON.parse(stdout);
+                if (opt.non_field_errors) {
+                    bcrypt.compare(password, user_data.password, (error, reply) => {
                         if (error) {
                             console.error(`An error occurred... ${error.message}`);
                             res.status(500).send({ error: error.message });
                         } else if (reply) {
-                            let { token, error } = getTokenFromConfigFile(username);
-                            if (error) {
-                                console.error(`An error occurred... ${error}`);
-                                res.status(500).send({ error });
-                            } else if (token) {
-                                console.log(`Successfully logged in... Username: ${username}, Token: ${token}`);
-                                req.session.user = { name: username, token };
-                                res.status(200).send({ token });
-                            }
+                            // Server password changed but not updated the SyncBox
+                            console.error(`${username} has changed the server password...`);
+                            res.status(401).send({ error: 'Server password was changed' });
                         } else {
-                            console.error('Incorrect credentials');
-                            res.status(401).send({ error: 'Incorrect credentials' });
+                            console.error(`An error occurred... ${opt.non_field_errors}`);
+                            res.status(401).send({ error: opt.non_field_errors });
                         }
                     });
+                } else if (opt.token) {
+                    bcrypt.compare(password, user_data.password, (error, reply) => {
+                        if (!reply) {
+                            // update the SyncBox password and configuration file
+                            // saveUserInRedis(username, password, `${base_directory}/${username}/data`);
+                            updateUserPassword(username, password);
+                            updateConfigurationFile(`${base_directory}/${username}/seadrive.conf`, opt.token);
+                        }
+                        console.log(`Successfully logged in... Username: ${username}, Token: ${opt.token}`);
+                        req.session.user = { name: username, token: opt.token };
+                        res.status(200).send({ token: opt.token });
+                    });
                 }
-            });
-        } else {
-            console.error(`User: ${username} is not registered`);
-            res.status(500).send({ error: `User: ${username} is not registered` });
-        }
-    });
+            } else {
+                // cannot connect to the server
+                console.error(error?.message);
+                bcrypt.compare(password, user_data.password, (error, reply) => {
+                    if (error) {
+                        console.error(`An error occurred... ${error.message}`);
+                        res.status(500).send({ error: error.message });
+                    } else if (reply) {
+                        let { token, error } = getTokenFromConfigFile(username);
+                        if (error) {
+                            console.error(`An error occurred... ${error}`);
+                            res.status(500).send({ error });
+                        } else if (token) {
+                            console.log(`Successfully logged in... Username: ${username}, Token: ${token}`);
+                            req.session.user = { name: username, token };
+                            res.status(200).send({ token });
+                        }
+                    } else {
+                        console.error('Incorrect credentials');
+                        res.status(401).send({ error: 'Incorrect credentials' });
+                    }
+                });
+            }
+        });
+    } else {
+        console.error(`User: ${username} is not registered`);
+        res.status(500).send({ error: `User: ${username} is not registered` });
+    }
 });
 
 app.get('/data', async (req, res) => {
@@ -357,6 +358,69 @@ function dowloadScheduledFiles() {
     });
 }
 
+function getUserFromConfigFile(username: string): any {
+    try {
+        let data: any = yaml.load(fs.readFileSync('/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml', 'utf8'));
+        let users = data.users ? data.users : [];
+        for (let i = 0; i < users.length; i++) {
+            let user_object = users[i];
+            if (user_object.username === username) {
+                console.log(`${username} is registered with the SyncBox...`);
+                return { user: user_object };
+            }
+        }
+        return;
+    } catch (e) {
+        return { error: e }
+    }
+}
+
+function updateUserPassword(username: string, password: string) {
+    try {
+        let data: any = yaml.load(fs.readFileSync('/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml', 'utf8'));
+        let users = data.users ?? [];
+
+        for (let i = 0; i < users.length; i++) {
+            let user_object = users[i];
+            if (user_object.username === username) {
+                bcrypt.hash(password, 10, function (err: any, hash: string) {
+                    if (err) {
+                        console.error(err);
+                    } else if (hash) {
+                        user_object.password = `{bcrypt}${hash}`;
+                        data.users[i] = user_object;
+                        let yaml_string = yaml.dump(data);
+                        fs.writeFileSync('/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml', yaml_string, 'utf8');
+                        console.log(`Successfully updated the password of ${username}...`);
+                    }
+                });
+                break;
+            }
+        }
+    } catch (error) {
+        console.error(`An error occurred ${error}`);
+    }
+}
+
+function saveUserAndPassword(username: string, password: string, directory: string) {
+    try {
+        let data: any = yaml.load(fs.readFileSync('/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml', 'utf8'));
+        let user_count = data.users ? data.users.length : 0;
+        bcrypt.hash(password, 10, function (err: any, hash: string) {
+            if (err) {
+                console.error(err);
+            } else if (hash) {
+                data.users[user_count] = { username, password: `{bcrypt}${hash}`, rules: { path: directory, modify: true } };
+                let yaml_string = yaml.dump(data);
+                fs.writeFileSync('/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml', yaml_string, 'utf8');
+                console.log(`Successfully updated the password of ${username}...`);
+            }
+        });
+    } catch (error) {
+        console.error(`An error occurred ${error}`);
+    }
+}
+
 function updateConfigurationFile(file_name: string, new_token: string) {
     try {
         fs.readFile(file_name, 'utf8', (error, content) => {
@@ -374,18 +438,6 @@ function updateConfigurationFile(file_name: string, new_token: string) {
     } catch (error) {
         console.error(`An error occurred... ${error}`);
     }
-}
-
-function saveUserInRedis(username: string, password: string, directory: string) {
-    console.log(`Adding User: ${username} to the database...`);
-    bcrypt.hash(password, 10, function (err: any, hash: string) {
-        if (err) {
-            console.error(err);
-        } else if (hash) {
-            let new_user = { "Username": username, "Password": `{bcrypt}${hash}`, "Scope": directory };
-            saveUser(username, JSON.stringify(new_user));
-        }
-    });
 }
 
 function getTokenFromConfigFile(username: string): any {
