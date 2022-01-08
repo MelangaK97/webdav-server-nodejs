@@ -17,18 +17,18 @@ import { saveUser, getAllUsers, getUser, deleteUser, scheduleDownload, getAllSch
 import deleteDirectory from './system_utils/deleteDirectory';
 import { ExecException } from 'child_process';
 
+require('dotenv').config();
+
 declare module 'express-session' {
     export interface SessionData {
         user: { [key: string]: any };
     }
 }
 
-const host = 'http://www.nextbox.lk:81/';
-const data_directory = '/home/evindu/.seadrive/data';
-const base_directory = '/home/evindu/syncbox-data';
-const config_file_location = '/home/melangakasun/Desktop/FYP/nodejs/webdav/config.yaml';
-const realm = 'Seadrive';
-const server_port = 1901;
+const seeafile_host = process.env.SEAFILE_HOST ?? 'http://172.17.0.1:7080';
+const server_port = process.env.SERVER_PORT ?? 1901;
+const base_directory = process.env.VIRTUAL_DRIVE_CONTAINER_DIRECTORY ?? '/home/melangakasun/Desktop/FYP/test';
+const config_file_location = 'auth-config.yaml';
 
 const app = express();
 app.use(cors({
@@ -66,7 +66,7 @@ app.post('/register', (req, res) => {
         res.status(500).send({ error: `User: ${username} is already registered` });
     } else {
         // get access token from server
-        getToken(host, username, password, (error: ExecException | null, stdout: string, stderr: string) => {
+        getToken(seeafile_host, username, password, (error: ExecException | null, stdout: string, stderr: string) => {
             if (stdout) {
                 let opt: any = JSON.parse(stdout);
                 if (opt.non_field_errors) {
@@ -83,11 +83,11 @@ app.post('/register', (req, res) => {
                     if (!fs.existsSync(`${user_directory}/seadrive.conf`)) {
                         // creating the seadrive.conf file for the user
                         console.log(`Creating the configuration file...`);
-                        createConfig(`${user_directory}/seadrive.conf`, host, username, opt.token, username);
+                        createConfig(`${user_directory}/seadrive.conf`, seeafile_host, username, opt.token, username);
                     }
                     // Mounting the directory
                     console.log(`Mounting with the Seadrive directory...`);
-                    mountSeadrive(`${user_directory}/seadrive.conf`, data_directory, `${user_directory}/data`, `${user_directory}/seadrive.log`, true);
+                    mountSeadrive(`${user_directory}/seadrive.conf`, `${user_directory}/data`, `${user_directory}/seadrive.log`, true);
                     // await jsonCache.set('users', users);
                     // saveUserInRedis(username, password, `${user_directory}/data`);
                     saveUserAndPassword(username, password, `${user_directory}/data`);
@@ -117,7 +117,7 @@ app.post('/login', async (req, res) => {
     } else if (data?.user) {
         let user_data = data.user;
         // get access token from server
-        getToken(host, username, password, (error: ExecException | null, stdout: string, stderr: string) => {
+        getToken(seeafile_host, username, password, (error: ExecException | null, stdout: string, stderr: string) => {
             if (stdout) {
                 let opt: any = JSON.parse(stdout);
                 if (opt.non_field_errors) {
@@ -310,18 +310,20 @@ app.listen(server_port, () => {
     dowloadScheduledFiles();
 });
 
-async function mountDirectoriesForSavedUsers(): Promise<void> {
+function mountDirectoriesForSavedUsers() {
     try {
-        getAllUsers(async (user_list: { [s: string]: string }) => {
-            for (let [username, user_data] of Object.entries(user_list)) {
-                let user = JSON.parse(user_data);
-                await unmountDirectory(user.Scope);
-                mountSeadrive(`${base_directory}/${username}/seadrive.conf`, data_directory, user.Scope,
-                    `${base_directory}/${username}/seadrive.log`, true, () => {
-                        console.log(`Mounted directory for ${username} successfully...`);
-                    });
+        let user_list: any = getAllUsersFromConfigFile();
+        if (user_list?.users && user_list.users.length > 0) {
+            for (let index in user_list.users) {
+                let user = user_list.users[index];
+                if (user.rules?.path) {
+                    unmountDirectory(user.rules.path);
+                    mountSeadrive(`${base_directory}/${user.username}/seadrive.conf`, user.rules.path, `${base_directory}/${user.username}/seadrive.log`, true);
+                }
             }
-        });
+        } else if (user_list?.error) {
+            console.error(`An error occurred... ${user_list.error}`);
+        }
     } catch (error) {
         console.error(error);
     }
@@ -357,6 +359,15 @@ function dowloadScheduledFiles() {
             }
         });
     });
+}
+
+function getAllUsersFromConfigFile(): any {
+    try {
+        let data: any = yaml.load(fs.readFileSync(config_file_location, 'utf8'));
+        return { users: data.users ?? [] };
+    } catch (e) {
+        return { error: e }
+    }
 }
 
 function getUserFromConfigFile(username: string): any {

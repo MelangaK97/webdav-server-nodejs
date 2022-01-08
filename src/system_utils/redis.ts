@@ -2,7 +2,7 @@ import redis from 'redis';
 
 const redis_port = 6379;
 
-const redis_client = redis.createClient(redis_port);
+const redis_client = redis.createClient(redis_port, '172.17.0.1');
 
 export function saveUser(username: string, user_data: string): void {
     redis_client.hset('users', username, user_data, (error, reply) => {
